@@ -13,6 +13,8 @@ local resources = {
     {8846, "gromsblood", "herb"}, {13463, "dreamfoil", "herb"}, {13464, "golden sansam", "herb"},
     {13465, "mountain silversage", "herb"}, {13466, "plaguebloom", "herb"},
     {13467, "icecap", "herb"}, {13468, "black lotus", "herb"},
+    {248821, "demonsage", "herb"}, {248823, "marefoil", "herb"},
+    {274979, "hyjal silphium", "herb"},
     {11370, "dark iron", "ore"}, {7911, "truesilver", "ore"}, {3858, "mithril", "ore"},
     {10620, "thorium", "ore"}, {2770, "copper", "ore"}, {2775, "silver", "ore"},
     {2771, "tin", "ore"}, {2772, "iron", "ore"}, {2776, "gold", "ore"},

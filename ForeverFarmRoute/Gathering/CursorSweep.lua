@@ -45,6 +45,7 @@ NS.CursorScanWorkflow=Workflow
 -- either an empty response or the first positive confirmation vote.
 NS.CursorScanWorkflows={hud=Workflow:New(),quick=Workflow:New({knownOnly=true,validation=false,refinement=false,
     emptySettle=.1,resourceSettle=.1,dwell=.2})}
+NS.CursorScanWorkflows.farmDiscovery=Workflow:New({knownLocations=false,validation=false,refinement=false})
 NS.CursorScanWorkflows.hudQuick=Workflow:New({knownOnly=true,validation=false,refinement=false,
     emptySettle=.1,resourceSettle=.1,dwell=.2})
 local trial = {size = 0, alpha = 0, index = 0, moves = 0,workflow=NS.CursorScanWorkflows.hud}
@@ -752,7 +753,8 @@ function trial:Stop(reason)
     if self.AbortRefinement then self:AbortRefinement("trial stopped") end
     self.pausedRefinements={};self.validationBatchActive=false;self.validationQueue=nil
     self:RestoreMinimapControls()
-    if NS.ReplacementMinimap then NS.ReplacementMinimap:Stop() end
+    local quick=NS.QuickScanner
+    if NS.ReplacementMinimap and not (quick and quick.farmPass and quick.farmMap) then NS.ReplacementMinimap:Stop() end
     self:RestoreMap()
     self:QuestAreas(false)
     if self.keep then NS.KeepMinimapInHUD=self.keep end
@@ -1053,12 +1055,6 @@ function trial:WarmQuickLocations()
         end
     end
 end
--- FarmRoute: each 1.5 s pass only reaches ~14 spots, nearest first, and every
--- pass used to start over, re-checking the same nearest spots. Skip spots
--- checked in the last 30 s so successive passes work outward over the map.
-local QUICK_RECHECK=30
-local quickChecked={}
-local function quickKey(map,kind,x,y) return tostring(map)..':'..kind..':'..tostring(x)..':'..tostring(y) end
 -- History only schedules native reads. Try saved centres first, then at most
 -- four nearby samples for each centre that actually returned public empty.
 local function takeQuickLocation(scan,context,queue)
@@ -1074,7 +1070,6 @@ local function takeQuickLocation(scan,context,queue)
     end
     if best then
         local target=table.remove(queue,best)
-        if not target.quickOrigin then quickChecked[quickKey(target.map,target.kind,target.x,target.y)]=GetTime() end
         scan.knownProbes=(scan.knownProbes or 0)+1
         scan:Trace('quick target',string.format('#%d %s map=%s xy=%.3f,%.3f %s distance=%.1fyd queued=%d',
             scan.knownProbes,tostring(target.kind),tostring(target.map),target.x*100,target.y*100,
@@ -1104,8 +1099,6 @@ local function queueQuickLocation(scan,row,c)
     if row and row.kind==scan.scanKind and publicNumber(row.x) and publicNumber(row.y) then
         local key=row.kind..':'..tostring(row.x)..':'..tostring(row.y)
         local target={map=c.map,kind=row.kind,x=row.x,y=row.y}
-        local checked=quickChecked[quickKey(c.map,row.kind,row.x,row.y)]
-        if checked and GetTime()-checked<QUICK_RECHECK then scan.quickSeen[key]=true;return end
         if not scan.quickSeen[key] and scan:KnownLocationOffset(target,c) and #scan.quickQueue<128 then
             scan.quickSeen[key]=true
             scan.quickQueue[#scan.quickQueue+1]=target
@@ -1343,7 +1336,9 @@ function trial:Start()
     self.refineStatus='discovering native nodes';self.discoveryStatus='starting';self.confirmedProbes=0;self.positiveProbes=0
     self:QuestAreas(true)
     self.minimapTooltip=nil;self.normalTooltip=nil;self:InstallTooltipHooks();self:UpdateTooltip()
-    self.iconScale=NS.GetNativeGatheringIconScale and NS:GetNativeGatheringIconScale() or NS._minimapIconScale or 1
+    local quick=NS.QuickScanner
+    local farm=quick and quick.farmPass and quick.farmMap
+    self.iconScale=farm and farm.iconScale or NS.GetNativeGatheringIconScale and NS:GetNativeGatheringIconScale() or NS._minimapIconScale or 1
     -- The selected presentation owns layout; sampling is shared.
     self.presentation:Prepare(self)
     self.nativeZoom=read(Minimap,'GetZoom')
@@ -1358,7 +1353,7 @@ function trial:Start()
     NS:SetManualNodeHoverEnabled(true)
     self.map=saveMap(); self.keep=NS.KeepMinimapInHUD
     NS.CursorSweepActive=true; NS.CursorSweepReady=false
-    self:EnableNearbyInteraction()
+    if not farm then self:EnableNearbyInteraction() end
     self.clientRotation=NS._minimapState and NS._minimapState.rotateMinimap
     self.presentation:Update(self)
     if not NS.MinimapScanActive and NS.UpdateHUDPositionIcon then NS:UpdateHUDPositionIcon();NS:UpdateHUDInteraction() end
@@ -1487,7 +1482,13 @@ function trial:Blocked()
     if IsMouselooking and IsMouselooking() and not steering then return 'camera' end
     if IsMouseButtonDown and (IsMouseButtonDown('LeftButton') or IsMouseButtonDown('RightButton')) and not steering then return 'mouse button' end
     if IsInInstance then local inside=IsInInstance(); if inside then return 'instance' end end
-    if self:NearbyGatheringObject() then return 'nearby gathering object' end
+    if NS.QuickScanner and NS.QuickScanner.farmPass then
+        if LootFrame and read(LootFrame,'IsShown') then return 'looting' end
+        for _,reader in pairs({UnitCastingInfo,UnitChannelInfo}) do
+            local ok,casting=pcall(reader,'player')
+            if not ok or issecretvalue and issecretvalue(casting) or casting~=nil then return 'casting' end
+        end
+    elseif self:NearbyGatheringObject() then return 'nearby gathering object' end
     -- IsShown remains true for a faded tooltip or one beneath a hidden parent.
     -- Only visible ordinary artwork should hold capture paused.
     local tooltipVisible=GameTooltip and read(GameTooltip,'IsShown')
@@ -2057,7 +2058,10 @@ function trial:Tick(now)
             local pending
             self.knownTarget,knownPoint,pending=self:NextKnownLocation(now)
             if self.workflow:Allows('knownOnly') and not self.knownTarget then
-                if not pending and self.quickDeadline==math.huge then
+                if not pending and self.knownProbes==0 and NS.QuickScanner and NS.QuickScanner.farmPass then
+                    self.workflow=NS.CursorScanWorkflows.farmDiscovery
+                    self:Trace('farm discovery','no nearby saved locations; using FDG area discovery')
+                elseif not pending and self.quickDeadline==math.huge then
                     -- Repeat bounded known-location queries, yielding between cycles.
                     -- Reset query bookkeeping only; historical rows stay untouched.
                     self.quickQueue=nil;self.quickNearby=nil
@@ -2065,9 +2069,11 @@ function trial:Tick(now)
                     pending=true
                 end
                 if pending then NS.CursorSweepReady=false;self.placed=nil;return end
-                if self.workflow==NS.CursorScanWorkflows.hudQuick then self:EndHUDQuickPass('known-location queue exhausted')
-                else self:Stop('known-location queue exhausted') end
-                return
+                if self.workflow:Allows('knownOnly') then
+                    if self.workflow==NS.CursorScanWorkflows.hudQuick then self:EndHUDQuickPass('known-location queue exhausted')
+                    else self:Stop('known-location queue exhausted') end
+                    return
+                end
             end
         end
         if not self.knownTarget then

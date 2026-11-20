@@ -80,9 +80,11 @@ function minimap:Finish()
     NS:RestoreMinimap()
     if NS.RestoreMinimapAttachments then NS:RestoreMinimapAttachments() end
     if NS.RestoreEllesmereControls then NS:RestoreEllesmereControls() end
-    if NS.RefreshNormalMinimap then NS:RefreshNormalMinimap() end
+    local quick=NS.QuickScanner
+    local farm=quick and quick.farmPass and quick.farmMap
+    if not farm and NS.RefreshNormalMinimap then NS:RefreshNormalMinimap() end
     -- Native geometry is restored now; only then expose its player arrow.
-    if Minimap and Minimap.SetIconScale and self.nativeIconScale then Minimap:SetIconScale(self.nativeIconScale) end
+    if Minimap and Minimap.SetIconScale and self.nativeIconScale then Minimap:SetIconScale(farm and 0 or self.nativeIconScale) end
     self.nativeIconScale=nil
     if self.host then self.host:Hide() end
 end

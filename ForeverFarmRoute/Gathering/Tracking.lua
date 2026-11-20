@@ -197,8 +197,10 @@ function NS:RunAutoTracking()
     lastTracking = current
     -- Confirm the exact requested filter independently: treasure can coexist
     -- with either gathering filter and must never mask their live state.
+    local quick = self.QuickScanner
+    local canRotateWhileStill = NS.CursorSweepActive == true or quick and quick.farmMap ~= nil
     if pendingSpell then
-        if pendingNeedsMovement and not CanSwitch(NS.CursorSweepActive==true) then return end
+        if pendingNeedsMovement and not CanSwitch(canRotateWhileStill) then return end
         if not activeSpells[pendingSpell] then PauseAutoTracking(true); return end
         if self.OnAutomaticGatheringSwitch and (pendingSpell==HERBS or pendingSpell==MINERALS) then
             self:OnAutomaticGatheringSwitch(pendingSpell)
@@ -206,8 +208,7 @@ function NS:RunAutoTracking()
         pendingSpell = nil
     end
     -- Hold automatic rotation through quick startup and capture.
-    local quick = self.QuickScanner
-    if quick and ((quick.enabled and (quick.pending or quick.running))
+    if quick and (((quick.enabled or quick.farmMap) and (quick.pending or quick.running))
         or quick.hudEnabled and (quick.pending or self.CursorSweepTrial.hudQuickPass)) then return end
     local nextSpell, rotating
     if NS.db.hud.trackingSwapsPaused then
@@ -234,7 +235,8 @@ function NS:RunAutoTracking()
         -- With both professions and no selection, start with herbs.
         nextSpell = available[1]
         if not indices[nextSpell] then return end
-    elseif NS:IsAutoTrackingEnabled() and #available >= 2 and indices[HERBS] and indices[MINERALS] and CanSwitch(NS.CursorSweepActive==true) then
+    elseif NS:IsAutoTrackingEnabled() and #available >= 2 and indices[HERBS] and indices[MINERALS] and CanSwitch(canRotateWhileStill) then
+        if quick and quick.farmHovering then return end
         if self.IsCursorSweepSwapReady and not self:IsCursorSweepSwapReady() then return end
         nextSpell = current == HERBS and MINERALS or HERBS
         rotating = true

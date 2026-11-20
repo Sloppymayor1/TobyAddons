@@ -113,6 +113,7 @@ events:SetScript('OnEvent',function()areas:Invalidate()end)
 function areas:UpdateContent()
     if self.clip then self.clip:Hide();self.blob:DrawNone() end
     if not map.frame or not map.frame:IsShown() then self.reason='inactive';return end
+    if map.farmRotating then self.reason='quest area renderer is north-up only';return end
     -- Capture temporarily disables native quest areas. The replacement follows
     -- the user's preference from before capture, rather than that hidden state.
     local enabled=safe(GetCVarBool,'questPOI')

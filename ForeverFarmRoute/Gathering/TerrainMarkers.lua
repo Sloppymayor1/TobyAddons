@@ -155,7 +155,7 @@ function markers:CollectRestedXP(continent,x,y,span)
             if not public(alpha) then alpha=0 elseif not number(alpha) then alpha=1 end
             alpha=math.max(0,math.min(1,alpha))
             if cont==continent and number(wx) and number(wy) and type(label)=='string' and #label>0 and #label<=256 and alpha>0 then
-                local dx,dy=(y-wy)/span,(wx-x)/span
+                local dx,dy=map:ProjectOffset((y-wy)/span,(wx-x)/span)
                 if (wx-x)^2+(wy-y)^2<=radius^2 and math.abs(dx)<=.44 and math.abs(dy)<=.44 then
                     local r,g,b=safe(text.GetTextColor,text)
                     if not number(r) or not number(g) or not number(b) then r,g,b=1,.82,0 end
@@ -249,7 +249,7 @@ function markers:CollectQuestie(continent,x,y,span)
             local cont,wx,wy=self:RestedXPWorld(data,coordinates)
             local texture=safe(pin.texture.GetTexture,pin.texture)
             if cont==continent and number(wx) and number(wy) and (number(texture) or type(texture)=='string') then
-                local dx,dy=(y-wy)/span,(wx-x)/span
+                local dx,dy=map:ProjectOffset((y-wy)/span,(wx-x)/span)
                 -- Clip in world yards before projection; never stack distant pins at the edge.
                 if (wx-x)^2+(wy-y)^2<=radius^2 and math.abs(dx)<=.44 and math.abs(dy)<=.44 then
                     local r,g,b=safe(pin.texture.GetVertexColor,pin.texture)
@@ -378,7 +378,7 @@ function markers:DrawQuestiePatrols(continent,x,y,span,width,height)
             and world.minY<=y+reach and world.maxY>=y-reach then
             local entry=self.questiePatrolEntries[key]
             local rebuild=not entry or entry.world~=world or entry.continent~=continent
-                or entry.span~=span or entry.width~=width or entry.height~=height
+                or entry.span~=span or entry.width~=width or entry.height~=height or entry.rotation~=map.rotation
                 or math.max(math.abs(x-entry.x),math.abs(y-entry.y))>span*.2
             local color=safe(paths.Color,path)
             local style={thickness=profile.waypointWidth or 2,color=color,alpha=item.alpha,
@@ -394,19 +394,21 @@ function markers:DrawQuestiePatrols(continent,x,y,span,width,height)
                                 local a,b=source[i-1],source[i]
                                 local ax,ay,bx,by=patrolSegment(a.x,a.y,b.x,b.y,x-reach,x+reach,y-reach,y+reach)
                                 if ax then
-                                    local px,py=(y-ay)/span*width,(x-ax)/span*height
+                                     local px,py=map:ProjectOffset((y-ay)/span,(x-ax)/span)
+                                     local qx,qy=map:ProjectOffset((y-by)/span,(x-bx)/span)
+                                     px,py=px*width,py*height
                                     local last=run and run[#run]
                                     if not last or math.abs(last.x-px)>.0001 or math.abs(last.y-py)>.0001 then
                                         run={{x=px,y=py}};runs[#runs+1]=run
                                     end
-                                    run[#run+1]={x=(y-by)/span*width,y=(x-bx)/span*height}
+                                     run[#run+1]={x=qx*width,y=qy*height}
                                 else run=nil end
                             end
                         end
                     end
                     if #runs>0 then
                         local view=self.questiePatrolRenderer:Draw(self.questiePatrolViews[key],runs,style)
-                        entry={world=world,continent=continent,span=span,width=width,height=height,x=x,y=y,view=view}
+                         entry={world=world,continent=continent,span=span,width=width,height=height,x=x,y=y,view=view,rotation=map.rotation}
                     else entry=nil end
                 elseif self.questiePatrolRenderer.Restyle and (not entry.style
                     or entry.style.thickness~=style.thickness or entry.style.alpha~=style.alpha
@@ -418,7 +420,8 @@ function markers:DrawQuestiePatrols(continent,x,y,span,width,height)
                 if entry then
                     entry.style=style
                     local view=entry.view
-                    local dx,dy=(y-entry.y)/span*width,(entry.x-x)/span*height
+                     local dx,dy=map:ProjectOffset((y-entry.y)/span,(entry.x-x)/span)
+                     dx,dy=dx*width,dy*height
                     if entry.dx~=dx or entry.dy~=dy then
                         view:ClearAllPoints();view:SetPoint('TOPLEFT',view:GetParent(),'TOPLEFT',dx,dy)
                         entry.dx,entry.dy=dx,dy
@@ -572,7 +575,7 @@ function markers:Collect(continent,x,y,span,now)
     local result={}
     local function add(kind,cont,wx,wy,texture,size,alpha)
         if cont~=continent or not number(wx) or not number(wy) then return end
-        local east,north=(y-wy)/span,(wx-x)/span
+        local east,north=map:ProjectOffset((y-wy)/span,(wx-x)/span)
         -- Keep the whole icon within the terrain; distant waypoints stay on its edge.
         if kind=='waypoint' or kind=='corpse' then
             local ratio=math.max(1,math.abs(east)/0.44,math.abs(north)/0.44)
@@ -582,7 +585,9 @@ function markers:Collect(continent,x,y,span,now)
         return result[#result]
     end
     local db=NS.db and NS.db.hud or {}
-    local size=number(db.nodeIconSize) and math.max(8,math.min(32,db.nodeIconSize)) or 14
+    local farm=NS.QuickScanner and NS.QuickScanner.farmMap
+    local iconSize=farm and (db.farmIconSize or 22) or db.nodeIconSize
+    local size=number(iconSize) and math.max(8,math.min(32,iconSize)) or 14
     local cache=NS.GatheringNodeCache or {}
     local context=NS.GetGatheringNodeContext and NS:GetGatheringNodeContext()
     for i=1,math.min(#cache,128) do

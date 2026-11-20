@@ -533,6 +533,9 @@ function NS:GetGatheringObservationTTL(node)
     end
     -- FarmRoute: remember nodes for a farming lap (10 minutes), not 30-60 s.
     -- Gathered nodes and nodes a later scan finds gone are still removed.
+    if node.anonymous and not (node.manualRefined or node.centered or node.fastLocation) and self:FarmHUDOpen() then
+        return math.min(ttl,30)
+    end
     return math.max(ttl, FARM_NODE_TTL)
 end
 local function prune(now)
@@ -687,8 +690,10 @@ local function drawLayer(ctx, now, layer, pool, mode)
         local ambiguous=NS:IsCursorObservationAmbiguous(node,ctx,now)
         if ambiguous then rendered.status='extra picture pending separate centre verification' end
         if not ambiguous and (node.centered or node.fastLocation or node.manualProvisional) and node.map == ctx.map and now - node.seen <= NS:GetGatheringObservationTTL(node) then
-            local displayX,displayY=node.x,node.y
-            local manualCoordinateOnly=node.anonymous and (node.quickScanObservation or NS.CursorSweepActive and NS.CursorSweepTrial and NS.CursorSweepTrial.workflow and NS.CursorSweepTrial.workflow:Allows('knownOnly') or not node.cursorSweepObservation and not NS.CursorSweepActive)
+            -- A FarmRoute probe has already checked a specific spawn spot.
+            -- Artwork can load separately from the marker position.
+            local displayX,displayY=node.farmProbeX or node.x,node.farmProbeY or node.y
+            local manualCoordinateOnly=node.anonymous and not node.farmProbeKey and (node.quickScanObservation or NS.CursorSweepActive and NS.CursorSweepTrial and NS.CursorSweepTrial.workflow and NS.CursorSweepTrial.workflow:Allows('knownOnly') or not node.cursorSweepObservation and not NS.CursorSweepActive)
             if manualCoordinateOnly then
                 local known,alternative,reason,anchor,types
                 if NS.GetAnonymousNodeArtwork then known,alternative,reason,anchor,types=NS:GetAnonymousNodeArtwork(node) end
@@ -891,7 +896,9 @@ local function draw(ctx, now)
             hudView={radius=ctx.radius,cos=ctx.cos,sin=ctx.sin}
         end
     end
-    drawLayer(display, now, NS.NodeOverlay, icons, overlayMode)
+    local terrain=NS.QuickScanner and NS.QuickScanner.farmMap and NS.TerrainMinimap.frame
+    if terrain and terrain:IsShown() then hideIcons(icons)
+    else drawLayer(display, now, NS.NodeOverlay, icons, overlayMode) end
     NS.LastNodeDrawComplete=now
     local dual = overlays.dualHUD
     if not (NS.db.hud.enabled and NS.db.hud.keepMinimap and NS.HUDFrame and ctx) then
@@ -2198,7 +2205,7 @@ function NS:GetCompactNodeDiagnostic(limit)
         local node=nodes[i]
         local r=renderStates[node]
         local origin=node.manualKeyAnchor and 'manual bind' or node.quickScanObservation and 'quick scan'
-            or node.cursorSweepObservation and 'full scan' or 'physical hover'
+            or node.cursorSweepObservation and 'full scan' or node.farmProbeKey and 'FarmRoute scan' or 'physical hover'
         local function xy(x,y)
             if not number(x) or not number(y) then return 'unplaced' end
             return string.format('%.3f,%.3f',x*100,y*100)
@@ -2778,7 +2785,7 @@ local function physicalUpdate(ctx, now)
     -- Idle HUD replacement hides the native map. Pointer intersections with
     -- that hidden surface are not intentional physical minimap hovers.
     if not NS.CursorSweepActive and (automaticScanOwnsSession()
-        or NS.QuickScanner and NS.QuickScanner.hudMapDisplay) then
+        or NS.QuickScanner and (NS.QuickScanner.hudMapDisplay or NS.QuickScanner.farmMap)) then
         manual.pending,manual.latch,manual.absence,manual.passive=nil,nil,nil,nil
         resetGatherClearance()
         placementInput("blocked: idle replacement owns hidden native map",ctx)
@@ -2815,12 +2822,12 @@ local function physicalUpdate(ctx, now)
     local hits, keys, reliable, nonempty = {}, {}, true, false
     local publicLabels, unreadable, questOnly = {}, nil, true
     local hasResourceLabel=false
+    local farm=NS:FarmHUDOpen()
+    local farmHover=farm and not NS.CursorSweepActive
     local anonymous=NS.GetAnonymousGatheringResource and NS:GetAnonymousGatheringResource(data,ctx,px,py)
-    if anonymous then
-        local key=anonymous.kind..':'..anonymous.id..':'..anonymous.name
-        hits[1]={resource=anonymous,label=anonymous.name,line=data.lines[1],tooltipCount=1,tooltipSources={'1L'}}
-        keys[key]=hits[1];nonempty=true;questOnly=false;hasResourceLabel=true
-    else
+    if anonymous and farm and validationReady[anonymous.kind]
+        and now<validationReady[anonymous.kind]-TRACKING_SETTLE+0.2 then anonymous=nil end
+    if not anonymous or farm then
     for i = 1, 32 do
         local line = data.lines[i]
         if not public(line) or line ~= nil and type(line) ~= "table" then reliable = false;unreadable="line "..i
@@ -2844,6 +2851,7 @@ local function physicalUpdate(ctx, now)
                         end
                         local resource = activeKind and resourceFor(label, activeKind)
                         if not resource and activeTreasure then resource = resourceFor(label, "treasure") end
+                        if not resource and farmHover then resource=resourceFor(label,'herb') or resourceFor(label,'ore') end
                         if resource and hasNodeSource(resource.kind) then
                             local key = resource.kind .. ":" .. resource.id .. ":" .. resource.name
                             if not keys[key] then
@@ -2863,6 +2871,14 @@ local function physicalUpdate(ctx, now)
             end
         end
     end
+    end
+    -- A readable resource name takes precedence over an inferred tracker type.
+    if anonymous and not hasResourceLabel then
+        local key=anonymous.kind..':'..anonymous.id..':'..anonymous.name
+        hits[1]={resource=anonymous,label=anonymous.name,line=data.lines[1],tooltipCount=1,tooltipSources={'1L'}}
+        keys[key]=hits[1];reliable=true;nonempty=true;questOnly=false;hasResourceLabel=true
+    elseif anonymous and farm and #hits>0 then
+        reliable=true -- The anonymous reader already validated the tooltip structure.
     end
     if not public(data.lines[33]) or data.lines[33] ~= nil then reliable = false;unreadable="tooltip exceeds 32 lines" end
     if NS.CursorSweepActive and NS.CursorSweepTrial.TraceNativeRead then
@@ -3231,9 +3247,6 @@ local function placementOnUpdate(_, dt)
     if now >= nextDraw then draw(ctx, now); nextDraw = now + 0.1 end
     if NS.ManualNodeHoverEnabled then
         scan, validation = nil, nil
-        -- FarmRoute: during a node probe the map sits under the cursor on
-        -- purpose; that is the probe's read, not a hover.
-        if NS.probing then return end
         local ok, err = pcall(physicalUpdate, ctx, now)
         if ok and err then draw(ctx, now) end -- Show new physical observations in this frame.
         if not ok then manual.pending, manual.absence, manual.passive = nil, nil, nil; manual.lastError = tostring(err) end
@@ -3323,113 +3336,6 @@ function NS:RememberNodeAtCursor()
     draw(ctx,now)
     if self.Print then self.Print('Added saved '..kind..' node at its database coordinates.') end
     return true
-end
-
--------------------------------------------------------------------------------
--- FarmRoute node probe (driven from Init.lua while the /farm HUD is open).
--- This client only reports the minimap dot under the real mouse cursor, so a
--- spawn spot is checked by sliding the map for a moment so that spot sits
--- under the cursor. These functions pick the spot and record the answer.
--------------------------------------------------------------------------------
-local PROBE_RECHECK=45 -- seconds before the same spawn spot is checked again
-local probeChecked={}
--- Offset of a world spot from the map centre, in screen pixels (+x east on
--- screen, +y up), and its squared distance in yards.
-local function probeOffset(ctx,x,y)
-    local e,n=(x-ctx.x)*ctx.w,(ctx.y-y)*ctx.h
-    local pixel=2*ctx.radius/(ctx.width*ctx.scale)
-    return (e*ctx.cos+n*ctx.sin)/pixel,(n*ctx.cos-e*ctx.sin)/pixel,e*e+n*n
-end
-NS.FarmProbeOffset=probeOffset
--- Nearest spawn spot of the tracked kind that is on the map and not checked
--- recently (saved gathering spots, bundled and imported databases).
-function NS:FarmNextProbeTarget(ctx,kind,now)
-    local half=ctx.width*ctx.scale/2-10
-    local round=(GetMinimapShape and GetMinimapShape() or 'ROUND')=='ROUND'
-    local best,bestD
-    local sources={self.db and self.db.nodeLocations,self.BundledNodeLocations,
-        self.GetImportedNodeLocations and self:GetImportedNodeLocations(ctx.map)}
-    for _,source in ipairs(sources) do
-        local rows=type(source)=='table' and source.version==1 and type(source.maps)=='table' and source.maps[ctx.map]
-        if type(rows)=='table' then
-            for _,row in ipairs(rows) do
-                if row.kind==kind and number(row.x) and number(row.y) then
-                    local dx,dy,d=probeOffset(ctx,row.x,row.y)
-                    local inside=math.abs(dx)<half and math.abs(dy)<half and (not round or dx*dx+dy*dy<half*half)
-                    -- The player arrow sits in the middle; it is not a node.
-                    if inside and dx*dx+dy*dy>36 then
-                        local key=ctx.map..':'..kind..':'..row.x..':'..row.y
-                        local checked=probeChecked[key]
-                        if (not checked or now-checked>=PROBE_RECHECK) and (not bestD or d<bestD) then
-                            best,bestD={map=ctx.map,kind=kind,x=row.x,y=row.y,key=key},d
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return best
-end
--- A probe whose read was spoiled (cursor moved, tracking swapped): try that
--- spot again after a short wait instead of straight away.
-function NS:FarmProbeDefer(target,now,seconds)
-    if target and target.key then probeChecked[target.key]=now-PROBE_RECHECK+seconds end
-end
--- Record what the probe read at a spawn spot. Returns 'found', 'empty' or
--- 'unreadable'; an unreadable answer changes nothing and is retried later.
-function NS:FarmProbeResult(target,data,ctx,now)
-    if not public(data) or type(data)~='table' then return 'unreadable' end
-    local lines=data.lines
-    if not public(lines) or type(lines)~='table' or not public(lines[1]) then return 'unreadable' end
-    probeChecked[target.key]=now
-    local resource
-    local first=lines[1]
-    if type(first)=='table' then
-        local text=first.leftText
-        if public(text) and type(text)=='string' then
-            for label in text:gmatch('[^\n]+') do resource=resource or resourceFor(label,target.kind) end
-        else
-            local dx,dy=probeOffset(ctx,target.x,target.y)
-            resource=self:GetAnonymousGatheringResource(data,ctx,ctx.width/2+dx/ctx.scale,ctx.height/2+dy/ctx.scale)
-        end
-    end
-    local node,index
-    for i,old in ipairs(nodes) do
-        if old.farmProbeKey==target.key then node,index=old,i;break end
-    end
-    if resource and resource.kind==target.kind then
-        if not node then
-            -- Join a memory already near this spot (e.g. one learned by hover).
-            local spot={x=target.x,y=target.y}
-            local join=16*2*ctx.radius/(ctx.width*ctx.scale)
-            for _,old in ipairs(nodes) do
-                if old.map==ctx.map and old.kind==target.kind and distance(old,spot,ctx)<=join*join then node=old;break end
-            end
-        end
-        if not node then
-            if #nodes>=MAX_NODES then table.remove(nodes,1) end
-            node={anonymous=resource.anonymous or nil,id=resource.id,name=resource.name,kind=target.kind,
-                icon=resource.icon,map=ctx.map,x=target.x,y=target.y,uncertainty=1,manualProvisional=true}
-            nodes[#nodes+1]=node
-        end
-        node.farmProbeKey=target.key
-        node.farmEmptyReads=0
-        node.seen=now;node.observationTTL=FARM_NODE_TTL
-        draw(ctx,now)
-        return 'found'
-    end
-    if node and first==nil then
-        -- The spot read empty twice in a row: the node remembered there was
-        -- picked or despawned. One empty read alone never removes it.
-        node.farmEmptyReads=(node.farmEmptyReads or 0)+1
-        if node.farmEmptyReads>=2 then
-            table.remove(nodes,index)
-            draw(ctx,now)
-        else
-            probeChecked[target.key]=now-PROBE_RECHECK+10 -- check again soon
-        end
-    end
-    return first==nil and 'empty' or 'other'
 end
 
 -- Explicit dismissal affects session observations only, never saved history.
@@ -3608,7 +3514,8 @@ driver:SetScript("OnEvent", function(_, event, unit, targetOrCast, spellID, sent
             if node.manualKeyAnchor and not node.cursorSweepObservation then return true end
             -- Manual database artwork lists possible identities, not a known
             -- live species. A successful matching cast clears the whole icon.
-            if node.anonymous and not node.cursorSweepObservation then
+            if node.anonymous then
+                if NS:FarmHUDOpen() and not next(node.manualPossibleTypes or {}) then return true end
                 for _,entry in ipairs(node.manualPossibleTypes or {})do
                     if entry.id==targetID then return true end
                 end
@@ -3626,6 +3533,10 @@ driver:SetScript("OnEvent", function(_, event, unit, targetOrCast, spellID, sent
                 if d < best then second, nearest, best = best, i, d
                 elseif d < second then second = d end
             end
+        end
+        if nearest and nodes[nearest].anonymous and NS:FarmHUDOpen() and math.sqrt(second)-math.sqrt(best)<=1 then
+            nearest=nil
+            report.ambiguousRough=true
         end
         local roughRadius
         if not nearest and NS.ManualNodeHoverEnabled then

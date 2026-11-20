@@ -31,7 +31,9 @@ local DEFAULTS = {
     yardScale = 1,
     arrowLocked = false,
     staticMap = true, -- the HUD map keeps north up instead of turning with you
-    nodeScan = true, -- scan the HUD map for herb/ore dots (/farm scan)
+    -- FDG's farming map on the /farm HUD (/farm scan). Off by default: it hides
+    -- the game's own herb/ore dots and only shows nodes its scan finds.
+    nodeScan = false,
     dotScale = 1.6, -- size of the game's own node dots on the HUD (1 = normal)
     arrowPos = { "CENTER", "CENTER", 0, -220 },
     routes = {},
@@ -606,14 +608,23 @@ local lastRadius
 -- While a gathering scan has borrowed the minimap, its zoom and rotation are
 -- the scanner's; keep using the HUD's own (last seen outside a scan).
 local function ScanActive() return NS.ScanOwnsMap ~= nil and NS.ScanOwnsMap() end
+local function FarmScanMap()
+    local gathering = NS.Gathering
+    local map = gathering and gathering.QuickScanner and gathering.QuickScanner.farmMap and gathering.TerrainMinimap
+    return map and map.frame and map.frame:IsShown() and map or nil
+end
 local hudRotating
 local function Rotating()
+    local map = FarmScanMap()
+    if map then return map.farmRotating end
     if hudRotating ~= nil and ScanActive() then return hudRotating end
     hudRotating = NS.GetCVar("rotateMinimap") == "1"
     return hudRotating
 end
 
 local function ViewRadius()
+    local farmMap = FarmScanMap()
+    if farmMap then return farmMap:GetDisplaySpan() * 0.5 * (db.yardScale or 1) end
     if lastRadius and ScanActive() then return lastRadius * (db.yardScale or 1) end
     local r
     if C_Minimap and C_Minimap.GetViewRadius then
@@ -783,9 +794,9 @@ end
 -- /fdg) has briefly moved the real minimap under the cursor. Pulling it back
 -- mid-probe would spoil the read.
 local function ScanOwnsMap()
-    if NS.probing then return true end
     local G = NS.Gathering
-    return G ~= nil and (G.MinimapScanActive or (G.CursorSweepTrial and G.CursorSweepTrial.saved ~= nil)) and true or false
+    return G ~= nil and (G.MinimapScanActive or (G.CursorSweepTrial and G.CursorSweepTrial.saved ~= nil)
+        or (G.QuickScanner and G.QuickScanner.farmMap ~= nil)) and true or false
 end
 NS.ScanOwnsMap = ScanOwnsMap
 
@@ -897,6 +908,10 @@ local function HookMapAlpha()
     if alphaHooked or not hooksecurefunc or not Minimap.SetAlpha then return end
     alphaHooked = true
     hooksecurefunc(Minimap, "SetAlpha", function(_, value)
+        if mapHolder.capturing then
+            if NS.Num(value) ~= 0 then CallOriginal("SetAlpha", 0) end
+            return
+        end
         if not db or db.disabled or ScanOwnsMap() then return end
         local hud = _G.ForeverFarmHUD_HUD
         local hdb = ForeverFarmHUDDB and ForeverFarmHUDDB.hud
@@ -934,6 +949,8 @@ end
 -- HUD's place; keep the route on the stand-in, not on the moving minimap.
 local function MapFrame()
     SyncMapHolder()
+    local farmMap = FarmScanMap()
+    if farmMap then return farmMap.frame, 32 end
     if mapHolder:IsShown() then return mapHolder, 6 end -- /farm HUD: fixed frame
     local G = NS.Gathering
     local stand = G and G.MinimapScanActive and G.TerrainMinimap and G.TerrainMinimap.frame
@@ -964,10 +981,13 @@ local function Draw(c, target, pE, pN, now, grindE, grindN)
         local k = half / radius
         local cs, sn = 1, 0
         if Rotating() then
-            local f = Facing(moveDE, moveDN) or 0
+            local map = FarmScanMap()
+            local f = map and map.rotation or Facing(moveDE, moveDN) or 0
             cs, sn = cos(f), sin(f)
         end
-        square = GetMinimapShape ~= nil and GetMinimapShape() == "SQUARE"
+        local map = FarmScanMap()
+        if map and map.original then square = map.original.round == false
+        else square = GetMinimapShape ~= nil and GetMinimapShape() == "SQUARE" end
         lim = half - 1
 
         local function P(e, n)
@@ -1079,7 +1099,8 @@ local function Draw(c, target, pE, pN, now, grindE, grindN)
         local k = half / radius
         local cs, sn = 1, 0
         if Rotating() then
-            local f = Facing(moveDE, moveDN) or 0
+            local map = FarmScanMap()
+            local f = map and map.rotation or Facing(moveDE, moveDN) or 0
             cs, sn = cos(f), sin(f)
         end
         if pendingBurst and c and c.E[pendingBurst] then
@@ -1540,7 +1561,7 @@ local HELP = {
     "/farm fog [yd]  - world map: whole route / only near you",
     "/farm track  - swap Find Herbs / Find Minerals while the HUD is open (on by default)",
     "/farm icons <8-32>  - node icon size on the HUD    /fdg  - gathering settings",
-    "/farm scan [on | off]  - remember herb/ore dots by checking nearby spawn spots (on by default)",
+    "/farm scan [on | off]  - FDG's farming map on the HUD; hides the game's own dots (off by default)",
     "/farm dots <1-3>  - size of the game's node dots on the HUD (1.6 by default)",
     "/farm static  - HUD map keeps north up / turns with you (north up by default)",
     "/farm bindings  - wheel down = Interact, wheel up = Dire Wolf, middle click = auto run; off by default",
@@ -1552,6 +1573,8 @@ local HELP = {
 
 SLASH_FOREVERFARMROUTE1 = "/farm"
 SLASH_FOREVERFARMROUTE2 = "/ffr"
+SLASH_FOREVERFARMROUTESTATIC1 = "/static"
+SlashCmdList.FOREVERFARMROUTESTATIC = function() SlashCmdList.FOREVERFARMROUTE("static") end
 SlashCmdList.FOREVERFARMROUTE = function(msg)
     msg = (msg or ""):match("^%s*(.-)%s*$")
     local cmd, rest = msg:match("^(%S*)%s*(.-)$")
@@ -1652,8 +1675,9 @@ SlashCmdList.FOREVERFARMROUTE = function(msg)
         if rest:lower() == "off" then db.nodeScan = false
         elseif rest:lower() == "on" then db.nodeScan = true
         else db.nodeScan = not db.nodeScan end
-        Print("Node scan: " .. (db.nodeScan and "on" or "off")
-            .. " - checks nearby spawn spots for herb/ore dots while your cursor is free (/farm scan on | off)")
+        local gathering = NS.Gathering
+        if not db.nodeScan and gathering and gathering.QuickScanner then gathering.QuickScanner:StopFarmMinimap() end
+        Print("FDG quick scan and farming map: " .. (db.nodeScan and "on" or "off"))
     elseif cmd == "static" then
         db.staticMap = not db.staticMap
         Print("HUD map: " .. (db.staticMap and "north up" or "turns with you")
@@ -1735,9 +1759,9 @@ driver:SetScript("OnEvent", function(self, event, arg1)
         db.dir, db.target = nil, nil
         -- 2026-11-20: the trail now lasts about 10 s; move saved settings over once.
         if not db.trail10 then db.trailSeconds, db.trail10 = 10, true end
-        -- 2026-11-20: the scan after each swap is on again (it no longer
-        -- jumps the icons or route); switch it on once for saved settings.
-        if not db.scanOn2 then db.nodeScan, db.scanOn2 = true, true end
+        -- 2026-11-20: FDG's farming map hid the game's dots on /farm and made
+        -- herb/ore swaps erratic; switch it off once for saved settings.
+        if not db.scanOff3 then db.nodeScan, db.scanOff3 = false, true end
         -- 2026-11-20: back to a north-up HUD map (a test left it rotating, and
         -- each scan turns it north-up, so it flipped every swap).
         if not db.static2 then db.staticMap, db.static2 = true, true end

@@ -357,11 +357,16 @@ function map:StyleTexture(texture)
     if not self.roundMask or not texture.AddMaskTexture then return end
     -- Square tile rectangles already stop at the map bounds. Even a white
     -- mask can feather against its black sampling border; omit it entirely.
-    if self:UsesNativeView() and not (self.original and self.original.round==false) then
+    if self:UsesNativeView() and (self.farmRotating or not (self.original and self.original.round==false)) then
         if not texture.fdgRoundMasked then texture:AddMaskTexture(self.roundMask);texture.fdgRoundMasked=true end
     elseif texture.fdgRoundMasked then
         texture:RemoveMaskTexture(self.roundMask);texture.fdgRoundMasked=nil
     end
+end
+
+function map:ProjectOffset(east,north)
+    local c,s=self.rotationCos or 1,self.rotationSin or 0
+    return east*c+north*s, north*c-east*s
 end
 function map:UpdateSkinBorder()
     local style=self:UsesNativeView() and self.original and self.original.skinBorder
@@ -447,6 +452,11 @@ end
 function map:ResetPosition()
     if not self.frame then return end
     self.frame:ClearAllPoints()
+    local farm=NS.QuickScanner and NS.QuickScanner.farmMap
+    if farm then
+        self.frame:SetPoint('CENTER',farm.holder,'CENTER')
+        return
+    end
     if self.original then
         self.frame:SetPoint('CENTER',UIParent,'BOTTOMLEFT',self.original.x,self.original.y)
         return
@@ -455,7 +465,7 @@ function map:ResetPosition()
 end
 function map:Update()
     local db=settings()
-    local hudIdle=NS.QuickScanner and NS.QuickScanner.hudMapDisplay
+    local hudIdle=NS.QuickScanner and (NS.QuickScanner.hudMapDisplay or NS.QuickScanner.farmMap)
     if not db or not (NS.CursorSweepActive or hudIdle) or db.terrainEnabled==false and not (NS.MinimapScanActive or hudIdle) then
         self.reason='inactive';if self.frame then self.frame:Hide() end;return
     end
@@ -465,11 +475,17 @@ function map:Update()
     end
     self.displayIndoors=indoors==true
     self.displaySpan=self:ViewSpan(self.displayIndoors)
+    local facing=GetPlayerFacing and GetPlayerFacing()
+    local farm=NS.QuickScanner and NS.QuickScanner.farmMap
+    self.farmRotating=farm~=nil and FRNS_.db and FRNS_.db.staticMap==false
+    self.rotation=self.farmRotating and number(facing) and facing or 0
+    self.rotationCos,self.rotationSin=math.cos(self.rotation),math.sin(self.rotation)
+    local artworkSpan=self.farmRotating and math.min(1600,self.displaySpan*math.sqrt(2)) or self.displaySpan
     local ok,cont,x,y=pcall(self.Position,self)
     local layout,reason={},'terrain unavailable'
     if ok then
-        if indoors then layout,reason=self:CaveLayout(cont,x,y,self.displaySpan)
-        else layout=self:Layout(cont,x,y,self.displaySpan) end
+        if indoors then layout,reason=self:CaveLayout(cont,x,y,artworkSpan)
+        else layout=self:Layout(cont,x,y,artworkSpan) end
     end
     if #layout==0 then self.reason=reason;if self.frame then self.frame:Hide() end;return end
     if not self.frame then self:Create() end
@@ -480,9 +496,10 @@ function map:Update()
     end
     -- FarmRoute: over the see-through /farm HUD, match its map opacity so a
     -- scan doesn't flash a solid map.
-    local farm=NS.FarmHUDOpen and NS:FarmHUDOpen() and ForeverFarmHUDDB and ForeverFarmHUDDB.hud
-    self.frame:SetSize(width,height);self.frame:SetAlpha(farm and (farm.mapAlpha or 0.08) or 1)
+    local farmHUD=NS.FarmHUDOpen and NS:FarmHUDOpen() and ForeverFarmHUDDB and ForeverFarmHUDDB.hud
+    self.frame:SetSize(width,height);self.frame:SetAlpha(farmHUD and (farmHUD.mapAlpha or 0.08) or 1)
     self:UpdateAppearance()
+    local projection=NS.ExperimentalHUDTerrain
     for i,rect in ipairs(layout) do
         local tex=self.tiles[i]
         if not tex then tex=self.frame:CreateTexture(nil,'ARTWORK');self.tiles[i]=tex end
@@ -492,11 +509,30 @@ function map:Update()
         if self:UsesNativeView() and not rect.cave then
             tex:SetVertexColor(0.892,0.828,0.770)
         else tex:SetVertexColor(1,1,1) end
-        tex:ClearAllPoints();tex:SetPoint('TOPLEFT',self.frame,'TOPLEFT',rect.x*width,-rect.y*height)
-        tex:SetSize(rect.w*width,rect.h*height)
+        tex:ClearAllPoints()
+        if self.farmRotating then
+            tex:SetPoint('CENTER',self.frame,'CENTER')
+            tex:SetSize(width,height)
+            if not rect.cave then
+                local points=projection:Vertices(rect,artworkSpan,self.displaySpan/2,self.rotationCos,self.rotationSin,width)
+                for i,point in ipairs(points) do
+                    local left,top=i<=2,i==1 or i==3
+                    tex:SetVertexOffset(i,point[1]+(left and width/2 or -width/2),point[2]*height/width+(top and -height/2 or height/2))
+                end
+                tex.farmWarped=true
+            end
+        else
+            tex:SetPoint('TOPLEFT',self.frame,'TOPLEFT',rect.x*width,-rect.y*height)
+            tex:SetSize(rect.w*width,rect.h*height)
+        end
+        if tex.farmWarped and (not self.farmRotating or rect.cave) then
+            for i=1,4 do tex:SetVertexOffset(i,0,0) end
+            tex.farmWarped=nil
+        end
         if rect.cave then
             tex:SetTexture(rect.id,'CLAMPTOBLACKADDITIVE','CLAMPTOBLACKADDITIVE')
-            tex:SetTexCoord(unpack(rect.coords))
+            local coords=self.farmRotating and projection:Coordinates(rect,artworkSpan,self.displaySpan/2,self.rotationCos,self.rotationSin)
+            tex:SetTexCoord(unpack(coords or rect.coords))
         else
             tex:SetTexture(rect.id)
             tex:SetTexCoord(rect.l,rect.r,rect.t,rect.b)
@@ -504,8 +540,7 @@ function map:Update()
         if self.hideTerrainArtwork and self:UsesNativeView() then tex:Hide() else tex:Show() end
     end
     for i=#layout+1,#self.tiles do self.tiles[i]:Hide() end
-    local facing=GetPlayerFacing and GetPlayerFacing()
-    if number(facing) then self.arrow:SetRotation(facing) end
+    if number(facing) then self.arrow:SetRotation(facing-self.rotation) end
     self.reason=indoors and reason or 'showing terrain'
     self.label:SetText(indoors and 'N  •  Cave' or 'N  •  Terrain')
     self.frame:Show()

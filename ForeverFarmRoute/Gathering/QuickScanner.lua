@@ -59,11 +59,89 @@ function quick:RefreshHUDMinimap()
         end
     end
 end
+-- ForeverFarmHUD hosts /farm. FDG owns its replacement map and capture.
+function quick:QueueFarmScan(now)
+    local kind=NS:GetCursorSweepTrackingKind()
+    if kind=='herb' or kind=='ore' then self.pending={kind=kind,at=now+.1,expires=now+.4,farm=true} end
+end
+
+function quick:StopFarmMinimap()
+    local farm=self.farmMap
+    if not farm or combat() then return end
+    if self.farmPass and NS.CursorSweepTrial.saved then NS:SetExperimentalNodeScanEnabled(false) end
+    if self.farmPass and NS.CursorSweepTrial.saved then return end
+    if self.pending and self.pending.farm then self.pending=nil end
+    self.farmMap=nil
+    self.farmHovering=nil
+    farm.holder.capturing=nil
+    farm.holder.releaseCapture=nil
+    NS.ReplacementMinimap:Stop()
+    if Minimap:GetParent()==farm.parent then
+        Minimap:SetAlpha(ForeverFarmHUDDB.hud.mapAlpha or farm.alpha)
+        if Minimap.SetIconScale then Minimap:SetIconScale(farm.iconScale) end
+    end
+end
+
+function quick:RefreshFarmMinimap(now)
+    if combat() or self.shuttingDown or not NS.db then return end
+    local route=FRNS_.db
+    local hud=ForeverFarmHUDDB and ForeverFarmHUDDB.hud
+    local modifier=hud and hud.mouseModifier
+    local interacting=hud and (hud.mouseMode or modifier=='SHIFT' and IsShiftKeyDown()
+        or modifier=='ALT' and IsAltKeyDown() or modifier=='CTRL' and IsControlKeyDown())
+    local requested=route and route.nodeScan and not route.disabled and NS:FarmHUDOpen()
+        and NS.db.hud.rememberNodes and not (self.enabled or self.hudEnabled or NS.db.hud.enabled or interacting)
+    local farm,trial,map=self.farmMap,NS.CursorSweepTrial,NS.ReplacementMinimap
+    local hover=NS.ReplacementMinimapHover
+    if farm then
+        if not requested or not (map.frame and map.frame:IsShown()) then
+            self:StopFarmMinimap()
+        else
+            local over=hover:PointerOverMap()
+            if over then
+                if self.pending and self.pending.farm then self.pending=nil end
+                if self.farmPass and trial.saved then NS:SetExperimentalNodeScanEnabled(false) end
+            elseif self.farmHovering then
+                self:QueueFarmScan(now)
+            end
+            self.farmHovering=over
+            map:Maintain()
+        end
+        return
+    end
+    if not requested or trial.saved or now<(self.nextFarmCheck or 0) then return end
+    self.nextFarmCheck=now+.1
+    local parent=_G.ForeverFarmHUD_HUD
+    if Minimap:GetParent()~=parent then return end
+    FRNS_.SyncMapHolder()
+    local holder=_G.ForeverFarmRouteMapHolder
+    if not holder or not holder:IsShown() then return end
+    map:CaptureOriginalGeometry()
+    if not map.original then return end
+    local alpha=Minimap:GetAlpha()
+    if issecretvalue and issecretvalue(alpha) or type(alpha)~='number' then return end
+    self.farmMap={parent=parent,holder=holder,alpha=alpha,iconScale=NS:GetNativeGatheringIconScale()}
+    local ok,err=pcall(map.Start,map)
+    if not ok or not (map.frame and map.frame:IsShown()) then
+        self:StopFarmMinimap()
+        if not ok then NS.Print('Farming minimap: '..tostring(err)) end
+        self.nextFarmCheck=now+1
+        return
+    end
+    holder.capturing=true
+    holder.releaseCapture=function() self:StopFarmMinimap() end
+    Minimap:SetAlpha(0)
+    if Minimap.SetIconScale then Minimap:SetIconScale(0) end
+    self.farmHovering=hover:PointerOverMap()
+    if not self.farmHovering then self:QueueFarmScan(now) end
+end
+
 function quick:SetEnabled(enabled)
     if enabled and (combat() or self.shuttingDown) then
         NS.Print('Enable quick scanning outside combat.');return false
     end
     local wasEnabled=self.enabled==true
+    if enabled and self.farmMap then self:StopFarmMinimap() end
     if enabled and NS.ReplacementMinimapHover and NS.ReplacementMinimapHover.armed then NS.ReplacementMinimapHover:Disarm() end
     self.enabled=enabled==true or nil;self.pending=nil;self.nextTimedScan=nil
     if not enabled and self.running and NS.CursorSweepTrial.workflow==NS.CursorScanWorkflows.quick then NS:SetExperimentalNodeScanEnabled(false) end
@@ -86,17 +164,18 @@ function NS:SetMinimapScanner(scanner)
 end
 function NS:OnAutomaticGatheringSwitch(spell)
     if self.db.quickScan and self.db.quickScan.trigger=="interval" then return end
-    if not (quick.enabled or quick.hudEnabled) or quick.shuttingDown or combat() then return end
+    if not (quick.enabled or quick.hudEnabled or quick.farmMap) or quick.shuttingDown or combat() then return end
     local kind=spell==2383 and 'herb' or spell==2580 and 'ore'
     if not kind then return end
-    quick.pending={kind=kind,at=GetTime()+.1,expires=GetTime()+.4,hud=quick.hudEnabled==true}
+    quick.pending={kind=kind,at=GetTime()+.1,expires=GetTime()+.4,hud=quick.hudEnabled==true,farm=quick.farmMap~=nil}
 end
 function quick:Update(now)
     local trial=NS.CursorSweepTrial
     self:RefreshHUDMinimap()
+    self:RefreshFarmMinimap(now)
     local continuous=NS.GetQuickScanDuration and NS:GetQuickScanDuration()==math.huge
     local timed=continuous or NS.db.quickScan and NS.db.quickScan.trigger=='interval'
-    if timed and (self.enabled or self.hudEnabled) and not self.shuttingDown then
+    if timed and (self.enabled or self.hudEnabled or self.farmMap) and not self.shuttingDown then
         local interval=continuous and .5 or NS.GetQuickScanInterval and NS:GetQuickScanInterval() or 10
         self.nextTimedScan=self.nextTimedScan or now+interval
         if now>=self.nextTimedScan then
@@ -106,7 +185,7 @@ function quick:Update(now)
                 and not (UnitIsDeadOrGhost and UnitIsDeadOrGhost('player')) then
                 local kind=NS:GetCursorSweepTrackingKind()
                 if kind=='herb' or kind=='ore' then
-                    self.pending={kind=kind,at=now+.1,expires=now+.4,hud=self.hudEnabled==true}
+                    self.pending={kind=kind,at=now+.1,expires=now+.4,hud=self.hudEnabled==true,farm=self.farmMap~=nil}
                 end
             end
         end
@@ -127,30 +206,38 @@ function quick:Update(now)
         return
     end
     if self.running then
-        if not trial.saved or trial.workflow~=NS.CursorScanWorkflows.quick then
+        local discovery=self.farmPass and trial.workflow==NS.CursorScanWorkflows.farmDiscovery
+        local expired=discovery and (trial.passReady or trial:SwapBudgetExpired()) or not discovery and now>=self.deadline
+        if not trial.saved or not discovery and trial.workflow~=NS.CursorScanWorkflows.quick then
+            if self.farmPass then
+                self.farmFinished=(self.farmFinished or 0)+1
+                self.farmHits=(self.farmHits or 0)+(trial.positiveProbes or 0)
+                self.farmPass=nil
+            end
             self.running=nil;refresh()
-        elseif not self.enabled or self.shuttingDown or combat() or now>=self.deadline
+        elseif not (self.enabled or self.farmMap) or self.shuttingDown or combat() or expired
             or NS.GetCursorSweepTrackingKind and NS:GetCursorSweepTrackingKind()~=self.kind then
-            trial.quickStopReason=not self.enabled and 'quick scanner disabled' or self.shuttingDown and 'shutdown'
-                or combat() and 'combat' or now>=self.deadline and 'scan duration deadline'
+            trial.quickStopReason=not (self.enabled or self.farmMap) and 'quick scanner disabled' or self.shuttingDown and 'shutdown'
+                or combat() and 'combat' or expired and (discovery and 'FDG discovery pass ended' or 'scan duration deadline')
                 or 'tracking changed '..tostring(self.kind)..' -> '..tostring(NS.GetCursorSweepTrackingKind and NS:GetCursorSweepTrackingKind())
             NS:SetExperimentalNodeScanEnabled(false)
         end
         return
     end
     local pending=self.pending
-    if not pending and self.enabled and not self.shuttingDown and not combat() and not trial.saved
+    if not pending and (self.enabled or self.farmMap) and not self.shuttingDown and not combat() and not trial.saved
         and now>=(self.nextPrepare or 0) and trial.WarmQuickLocations then
         self.nextPrepare=now+.05
         trial:WarmQuickLocations()
     end
     if not pending or now<pending.at then return end
     self.pending=nil
-    if now>pending.expires or not self.enabled or self.shuttingDown or combat() or trial.saved
+    local farm=pending.farm and self.farmMap
+    if now>pending.expires or not (self.enabled or farm) or self.shuttingDown or combat() or trial.saved
         or NS.db.hud.enabled or UnitIsDeadOrGhost and UnitIsDeadOrGhost('player')
         or not NS.GetCursorSweepTrackingKind or NS:GetCursorSweepTrackingKind()~=pending.kind then return end
     local map=NS.ReplacementMinimap or NS.TerrainMinimap
-    if map then map:CaptureOriginalGeometry() end
+    if map and not farm then map:CaptureOriginalGeometry() end
     if NS.ReplacementMinimapHover:PointerOverMap() then return end
     if NS.TerrainMarkers and NS.TerrainMarkers.SampleNativePins then
         local ok,err=pcall(NS.TerrainMarkers.SampleNativePins,NS.TerrainMarkers)
@@ -159,12 +246,15 @@ function quick:Update(now)
     NS:SetCursorScanWorkflow(NS.CursorScanWorkflows.quick)
     NS.MinimapScanActive=true
     self.running=true;self.kind=pending.kind;self.deadline=now+(NS.GetQuickScanDuration and NS:GetQuickScanDuration() or 1.5)
+    self.farmPass=farm and true or nil
     if not NS:SetExperimentalNodeScanEnabled(true) then
         if trial.saved then NS:SetExperimentalNodeScanEnabled(false) end
         if not trial.saved then
-            self.running=nil;NS.MinimapScanActive=nil
+            self.running=nil;self.farmPass=nil;NS.MinimapScanActive=nil
             NS:SetCursorScanWorkflow(NS.CursorScanWorkflows.hud)
         end
+    elseif farm then
+        self.farmStarts=(self.farmStarts or 0)+1
     end
 end
 local events=CreateFrame('Frame')
