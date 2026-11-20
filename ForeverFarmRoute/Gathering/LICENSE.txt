@@ -1,0 +1,20 @@
+Forever Dual Gathering
+Copyright (c) 2026 Earthbane. All rights reserved.
+
+Permission is granted to download, install, and use this addon for personal
+gameplay. Redistribution, republishing, or reuse of the original addon code
+requires prior permission from Earthbane, except where applicable law permits it.
+
+This notice applies only to original material owned by Earthbane. Third-party
+components in Libs/ retain their respective terms and notices; this notice
+does not replace or restrict permissions granted by their authors.
+
+The addon is provided as is, without warranty of any kind, to the extent
+permitted by applicable law.
+
+Permission to reuse in ForeverFarmRoute
+---------------------------------------
+On 2026-11-19 Earthbane (EarthbaneAddons) gave full permission to use this
+code in ForeverFarmRoute, writing: "You have full permission. I've abandoned
+the project and honestly I'm just glad someone is putting it to good use."
+The original copyright notice above is kept.

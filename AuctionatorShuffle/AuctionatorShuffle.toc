@@ -1,0 +1,11 @@
+## Interface: 11508, 11509, 16001
+## Title: Auctionator Shuffle
+## Notes: Shuffle profit lists (buy inputs, craft, sell outputs after 5% AH cut) using Auctionator prices. /shuffle
+## Dependencies: Auctionator
+## SavedVariables: AuctionatorShuffleDB
+## Version: 1.1
+
+CraftData.lua
+PlanData.lua
+AuctionatorShuffle.lua
+AuctionatorShuffle.xml

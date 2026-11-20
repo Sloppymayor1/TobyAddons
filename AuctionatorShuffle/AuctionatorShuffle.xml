@@ -1,0 +1,30 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+  <!-- Content frames for the "Shuffles" and "Crafts" tabs in Auctionator's auction house window. -->
+  <Frame name="AuctionatorShuffleTabTemplate" virtual="true" hidden="true">
+    <Anchors>
+      <Anchor point="TOPLEFT" x="8" y="-40"/>
+      <Anchor point="BOTTOMRIGHT" x="-8" y="30"/>
+    </Anchors>
+    <Scripts>
+      <OnLoad>AuctionatorShuffle_BuildTab(self, "shuffle")</OnLoad>
+    </Scripts>
+  </Frame>
+  <Frame name="AuctionatorShuffleCraftTabTemplate" virtual="true" hidden="true">
+    <Anchors>
+      <Anchor point="TOPLEFT" x="8" y="-40"/>
+      <Anchor point="BOTTOMRIGHT" x="-8" y="30"/>
+    </Anchors>
+    <Scripts>
+      <OnLoad>AuctionatorShuffle_BuildTab(self, "craft")</OnLoad>
+    </Scripts>
+  </Frame>
+  <Frame name="AuctionatorShuffleSnipeTabTemplate" virtual="true" hidden="true">
+    <Anchors>
+      <Anchor point="TOPLEFT" x="8" y="-40"/>
+      <Anchor point="BOTTOMRIGHT" x="-8" y="30"/>
+    </Anchors>
+    <Scripts>
+      <OnLoad>AuctionatorShuffle_BuildTab(self, "snipe")</OnLoad>
+    </Scripts>
+  </Frame>
+</Ui>

@@ -1,0 +1,67 @@
+## Interface: 16001
+## Title: ForeverFarmRoute
+## Notes: Route lines, a guide arrow, a colour trail, gathering combos, and herb/ore node memory with auto tracking swap. Type /farm
+## Version: 0.2.0
+## SavedVariables: ForeverFarmRouteDB, ForeverFarmRouteGatheringDB
+## OptionalDeps: ForeverFarmHUD, EllesmereUI, EllesmereUIMinimap, MBB, MinimapButtonBag, MinimapButtonBag-TurtleWoW
+
+Compat.lua
+Routes.lua
+Fx.lua
+Core.lua
+Celebrate.lua
+Bindings.lua
+
+# Gathering: Forever Dual Gathering built in (permission: Earthbane, 2026-11-19)
+Gathering\Init.lua
+Gathering\Libs\LibStub\LibStub.lua
+Gathering\Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Gathering\Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Gathering\Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+Gathering\Strings.lua
+Gathering\Core.lua
+Gathering\Tracking.lua
+Gathering\GatheringSkills.lua
+Gathering\NodeLocations.lua
+Gathering\NodeLocations\Kalimdor.lua
+Gathering\NodeLocations\EasternKingdoms.lua
+Gathering\NodeLocations\Dungeons.lua
+Gathering\NodeLocations\Other.lua
+Gathering\NodeLocationIndex.lua
+Gathering\NodeCatalogue.lua
+Gathering\NodeLocales.lua
+Gathering\NodeLocales\deDE.lua
+Gathering\NodeLocales\esES.lua
+Gathering\NodeLocales\esMX.lua
+Gathering\NodeLocales\frFR.lua
+Gathering\NodeLocales\itIT.lua
+Gathering\NodeLocales\koKR.lua
+Gathering\NodeLocales\ptBR.lua
+Gathering\NodeLocales\ruRU.lua
+Gathering\NodeLocales\zhCN.lua
+Gathering\NodeLocales\zhTW.lua
+Gathering\ImportedNodeLocations.lua
+Gathering\AnonymousNodes.lua
+Gathering\GatheringNodes.lua
+Gathering\Compatibility.lua
+Gathering\CombatLayout.lua
+Gathering\UI.lua
+Gathering\Minimap.lua
+Gathering\Keybind.lua
+Gathering\BundledCursorObservations.lua
+Gathering\RefinedNodeHints.lua
+Gathering\ScanPresentation.lua
+Gathering\CursorSweep.lua
+Gathering\CursorRefinement.lua
+Gathering\CursorValidation.lua
+Gathering\TerrainTiles.lua
+Gathering\TerrainCaveTiles.lua
+Gathering\TerrainMinimap.lua
+Gathering\ExperimentalHUDTerrain.lua
+Gathering\TerrainMarkers.lua
+Gathering\TerrainQuestAreas.lua
+Gathering\TerrainQuests.lua
+Gathering\MinimapControls.lua
+Gathering\MinimapHover.lua
+Gathering\ExperimentalMinimap.lua
+Gathering\QuickScanner.lua

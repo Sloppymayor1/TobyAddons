@@ -1,0 +1,3 @@
+<Bindings>
+    <Binding name="FDGCURSOR_TOGGLE" header="FDGCURSOR">FDGCursorToggle()</Binding>
+</Bindings>
