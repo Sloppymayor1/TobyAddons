@@ -26,7 +26,6 @@ local DEFAULTS = {
         autoTracking = false,
         autoTrackingWithHUD = false,
         autoTrackingWithFarmHUD = true, -- FarmRoute: swap while the /farm HUD is open
-        farmIconSize = 22, -- FarmRoute: node icon size on the /farm HUD
         trackingSwapsPaused = false,
         autoTrackingInDungeons = false,
         restoreTracking = true,
@@ -205,6 +204,7 @@ function NS:InitDB()
     local iconSize = tonumber(ForeverFarmRouteGatheringDB.hud.nodeIconSize) or 14
     if iconSize ~= iconSize then iconSize = 14 end
     ForeverFarmRouteGatheringDB.hud.nodeIconSize = math.max(8, math.min(32, math.floor(iconSize + 0.5)))
+    ForeverFarmRouteGatheringDB.hud.farmIconSize = nil -- FarmRoute's /farm size sets HUD icons now
 
     ForeverFarmRouteGatheringDB.version = 14
     self.db = ForeverFarmRouteGatheringDB

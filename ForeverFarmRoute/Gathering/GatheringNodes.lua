@@ -662,9 +662,9 @@ local function drawLayer(ctx, now, layer, pool, mode)
     if not number(overlayScale) or overlayScale <= 0 then hideIcons(pool); return end
     local elevationScale = ctx.scale / overlayScale * ctx.iconScale
     local iconSize = NS.db.hud.nodeIconSize
-    if mode == "minimap" and NS:FarmHUDOpen() then iconSize = NS.db.hud.farmIconSize or 22 end
     if not number(iconSize) then iconSize = 14 end
     iconSize = math.max(8, math.min(32, math.floor(iconSize + 0.5)))
+    if mode == "minimap" and NS:FarmHUDOpen() then iconSize = FRNS_.NodeIconPixels() end -- /farm size
     local opacity = NS.db.hud.nodeIconOpacity
     if not number(opacity) then opacity = 80 end
     opacity = math.max(0, math.min(100, opacity)) / 100
@@ -3247,6 +3247,9 @@ local function placementOnUpdate(_, dt)
     if now >= nextDraw then draw(ctx, now); nextDraw = now + 0.1 end
     if NS.ManualNodeHoverEnabled then
         scan, validation = nil, nil
+        -- FarmRoute: during a dot test the map is slid under the cursor on
+        -- purpose; those are the test's reads, not a hover (DotTest.lua).
+        if NS.probing then return end
         local ok, err = pcall(physicalUpdate, ctx, now)
         if ok and err then draw(ctx, now) end -- Show new physical observations in this frame.
         if not ok then manual.pending, manual.absence, manual.passive = nil, nil, nil; manual.lastError = tostring(err) end

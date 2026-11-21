@@ -586,8 +586,8 @@ function markers:Collect(continent,x,y,span,now)
     end
     local db=NS.db and NS.db.hud or {}
     local farm=NS.QuickScanner and NS.QuickScanner.farmMap
-    local iconSize=farm and (db.farmIconSize or 22) or db.nodeIconSize
-    local size=number(iconSize) and math.max(8,math.min(32,iconSize)) or 14
+    local size=number(db.nodeIconSize) and math.max(8,math.min(32,db.nodeIconSize)) or 14
+    if farm then size=FRNS_.NodeIconPixels() end -- /farm size
     local cache=NS.GatheringNodeCache or {}
     local context=NS.GetGatheringNodeContext and NS:GetGatheringNodeContext()
     for i=1,math.min(#cache,128) do

@@ -102,14 +102,14 @@ local function SyncStatic(open)
     end
 end
 
--- /farm dots: bigger native node dots on the /farm map, set when the HUD
+-- /farm size: bigger native node dots on the /farm map, set when the HUD
 -- opens and put back when it closes.
 local savedDotScale
 local function SyncDots(open)
     if InCombatLockdown() or not (Minimap and Minimap.SetIconScale) then return end
     if FR.ScanOwnsMap and FR.ScanOwnsMap() then return end
     local db = FR.db
-    local want = open and db and not db.disabled and tonumber(db.dotScale) or nil
+    local want = open and db and not db.disabled and FR.NodeSize() or nil
     if want and want ~= 1 then
         local current = G._minimapIconScale or 1
         if math.abs(current - want) > 0.001 then

@@ -34,7 +34,8 @@ local DEFAULTS = {
     -- FDG's farming map on the /farm HUD (/farm scan). Off by default: it hides
     -- the game's own herb/ore dots and only shows nodes its scan finds.
     nodeScan = false,
-    dotScale = 1.6, -- size of the game's own node dots on the HUD (1 = normal)
+    dotTest = true, -- measure-only dot test when the cursor rests on a HUD dot (/farm check)
+    nodeSize = 3, -- /farm size: node dots and icons on the HUD, times their normal size (1-10)
     arrowPos = { "CENTER", "CENTER", 0, -220 },
     routes = {},
     builtinSeen = {},
@@ -59,6 +60,7 @@ end
 local function Print(msg)
     DEFAULT_CHAT_FRAME:AddMessage("|cff40e0ffFarmRoute:|r " .. tostring(msg))
 end
+NS.Print = Print
 
 -------------------------------------------------------------------------------
 -- Import / export
@@ -793,7 +795,20 @@ end
 -- True while a node probe (or Dual Gathering's own scanner, if switched on in
 -- /fdg) has briefly moved the real minimap under the cursor. Pulling it back
 -- mid-probe would spoil the read.
+-- /farm size: node dots and icons on the HUD, as a multiple of their normal
+-- size. Normal is the game's dot at icon scale 1 and a 14 px node icon.
+function NS.NodeSize()
+    local n = tonumber(db and db.nodeSize)
+    if not n or n ~= n then return DEFAULTS.nodeSize end
+    return math.max(1, math.min(10, n))
+end
+
+function NS.NodeIconPixels()
+    return math.floor(14 * NS.NodeSize() + 0.5)
+end
+
 local function ScanOwnsMap()
+    if NS.probing then return true end -- a dot test (Gathering/DotTest.lua)
     local G = NS.Gathering
     return G ~= nil and (G.MinimapScanActive or (G.CursorSweepTrial and G.CursorSweepTrial.saved ~= nil)
         or (G.QuickScanner and G.QuickScanner.farmMap ~= nil)) and true or false
@@ -1560,9 +1575,9 @@ local HELP = {
     "/farm lock  - lock arrow (click-through)    /farm trail clear",
     "/farm fog [yd]  - world map: whole route / only near you",
     "/farm track  - swap Find Herbs / Find Minerals while the HUD is open (on by default)",
-    "/farm icons <8-32>  - node icon size on the HUD    /fdg  - gathering settings",
+    "/farm size <1-10>  - node dots and icons on the HUD, times normal size (3 by default)    /fdg  - gathering settings",
     "/farm scan [on | off]  - FDG's farming map on the HUD; hides the game's own dots (off by default)",
-    "/farm dots <1-3>  - size of the game's node dots on the HUD (1.6 by default)",
+    "/farm check [log]  - dot test on/off (measure only; runs when the cursor rests on a HUD dot); log shows results (on by default)",
     "/farm static  - HUD map keeps north up / turns with you (north up by default)",
     "/farm bindings  - wheel down = Interact, wheel up = Dire Wolf, middle click = auto run; off by default",
     "/farm fx  - effects on/off    /farm combo <sec>  - gathering combo window",
@@ -1661,16 +1676,10 @@ SlashCmdList.FOREVERFARMROUTE = function(msg)
         end
         G:UpdateAutoTracking()
         Print("Herb/Mineral tracking swap while the HUD is open: " .. (hud.autoTrackingWithFarmHUD and "on" or "off"))
-    elseif cmd == "icons" then
-        local G = NS.Gathering
+    elseif cmd == "size" then
         local n = tonumber(rest)
-        if not (G and G.db) then Print("Gathering isn't loaded.") return end
-        if n then G.db.hud.farmIconSize = math.max(8, math.min(32, math.floor(n + 0.5))) end
-        Print("Node icon size on the HUD: " .. (G.db.hud.farmIconSize or 22))
-    elseif cmd == "dots" then
-        local n = tonumber(rest)
-        if n then db.dotScale = math.max(1, math.min(3, n)) end
-        Print("Node dot size on the HUD: " .. db.dotScale .. "x  (/farm dots <1-3>)")
+        if n then db.nodeSize = math.max(1, math.min(10, n)) end
+        Print("Node size on the HUD: " .. NS.NodeSize() .. "x normal  (/farm size <1-10>, 3 by default)")
     elseif cmd == "scan" then
         if rest:lower() == "off" then db.nodeScan = false
         elseif rest:lower() == "on" then db.nodeScan = true
@@ -1678,6 +1687,12 @@ SlashCmdList.FOREVERFARMROUTE = function(msg)
         local gathering = NS.Gathering
         if not db.nodeScan and gathering and gathering.QuickScanner then gathering.QuickScanner:StopFarmMinimap() end
         Print("FDG quick scan and farming map: " .. (db.nodeScan and "on" or "off"))
+    elseif cmd == "check" then
+        local G = NS.Gathering
+        if rest:lower() ~= "log" then db.dotTest = db.dotTest == false end
+        Print("Dot test (measure only): " .. (db.dotTest ~= false and "on" or "off")
+            .. "  (/farm check to toggle, /farm check log for results)")
+        if G and G.DotTestSummary then Print(G:DotTestSummary()) end
     elseif cmd == "static" then
         db.staticMap = not db.staticMap
         Print("HUD map: " .. (db.staticMap and "north up" or "turns with you")
@@ -1759,9 +1774,13 @@ driver:SetScript("OnEvent", function(self, event, arg1)
         db.dir, db.target = nil, nil
         -- 2026-11-20: the trail now lasts about 10 s; move saved settings over once.
         if not db.trail10 then db.trailSeconds, db.trail10 = 10, true end
-        -- 2026-11-20: FDG's farming map hid the game's dots on /farm and made
-        -- herb/ore swaps erratic; switch it off once for saved settings.
-        if not db.scanOff3 then db.nodeScan, db.scanOff3 = false, true end
+        -- 2026-11-20: FDG's farming map hides the game's dots on /farm and holds
+        -- herb/ore swaps; the spawn-spot checks replace it. Switch it off once.
+        if not db.scanOff5 then db.nodeScan, db.scanOff5 = false, true end
+        -- 2026-11-20: /farm size replaces /farm dots and /farm icons.
+        db.dotScale = nil
+        -- 2026-11-20: the dot test replaces the spawn-spot checks.
+        db.swapCheck = nil
         -- 2026-11-20: back to a north-up HUD map (a test left it rotating, and
         -- each scan turns it north-up, so it flipped every swap).
         if not db.static2 then db.staticMap, db.static2 = true, true end
