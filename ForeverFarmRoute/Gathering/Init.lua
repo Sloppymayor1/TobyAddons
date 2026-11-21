@@ -29,8 +29,8 @@ local function Snapshot()
     if not G.SnapshotNodeTrace then return end
     local quick = G.QuickScanner
     local trial = G.CursorSweepTrial
-    local status = string.format("hudOpen=%s nodeScan=%s swaps=%d recoveries=%d | FDG quick starts=%d finished=%d hits=%d active=%s stop=%s",
-        tostring(G:FarmHUDOpen()), tostring(FR.db and FR.db.nodeScan), stats.swaps, stats.recoveries,
+    local status = string.format("hudOpen=%s sweep=%s swaps=%d recoveries=%d | FDG quick starts=%d finished=%d hits=%d active=%s stop=%s",
+        tostring(G:FarmHUDOpen()), tostring(FR.db and FR.db.sweep), stats.swaps, stats.recoveries,
         quick and quick.farmStarts or 0, quick and quick.farmFinished or 0, quick and quick.farmHits or 0,
         tostring(quick and quick.farmPass == true), tostring(trial and trial.quickStopReason))
     pcall(G.SnapshotNodeTrace, G, status)
@@ -87,7 +87,7 @@ end
 -- whatever the normal minimap uses; that setting comes back on close.
 local function SyncStatic(open)
     if InCombatLockdown() then return end
-    if FR.ScanOwnsMap and FR.ScanOwnsMap() then return end
+    if FR.FDGScanOwnsMap and FR.FDGScanOwnsMap() then return end
     local db = FR.db
     if open and db and not db.disabled then
         local want = db.staticMap ~= false and "0" or "1"

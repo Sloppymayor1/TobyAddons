@@ -31,10 +31,9 @@ local DEFAULTS = {
     yardScale = 1,
     arrowLocked = false,
     staticMap = true, -- the HUD map keeps north up instead of turning with you
-    -- FDG's farming map on the /farm HUD (/farm scan). Off by default: it hides
-    -- the game's own herb/ore dots and only shows nodes its scan finds.
-    nodeScan = false,
-    dotTest = true, -- measure-only dot test when the cursor rests on a HUD dot (/farm check)
+    -- /farm scan: the node sweep (Gathering/Sweep.lua) finds herbs and ore on
+    -- the HUD and draws both kinds itself, so they stay across tracking swaps.
+    sweep = true,
     nodeSize = 3, -- /farm size: node dots and icons on the HUD, times their normal size (1-10)
     arrowPos = { "CENTER", "CENTER", 0, -220 },
     routes = {},
@@ -609,7 +608,7 @@ end
 local lastRadius
 -- While a gathering scan has borrowed the minimap, its zoom and rotation are
 -- the scanner's; keep using the HUD's own (last seen outside a scan).
-local function ScanActive() return NS.ScanOwnsMap ~= nil and NS.ScanOwnsMap() end
+local function ScanActive() return NS.FDGScanOwnsMap ~= nil and NS.FDGScanOwnsMap() end
 local function FarmScanMap()
     local gathering = NS.Gathering
     local map = gathering and gathering.QuickScanner and gathering.QuickScanner.farmMap and gathering.TerrainMinimap
@@ -807,11 +806,20 @@ function NS.NodeIconPixels()
     return math.floor(14 * NS.NodeSize() + 0.5)
 end
 
-local function ScanOwnsMap()
-    if NS.probing then return true end -- a dot test (Gathering/DotTest.lua)
+-- Dual Gathering's own scanners: they also change the map's zoom, size and
+-- rotation, so FarmRoute's upkeep of those waits for them.
+local function FDGScanOwnsMap()
     local G = NS.Gathering
     return G ~= nil and (G.MinimapScanActive or (G.CursorSweepTrial and G.CursorSweepTrial.saved ~= nil)
         or (G.QuickScanner and G.QuickScanner.farmMap ~= nil)) and true or false
+end
+NS.FDGScanOwnsMap = FDGScanOwnsMap
+-- Also true while FarmRoute's node sweep (Gathering/Sweep.lua) holds the map.
+-- The sweep only moves the map, so the map holder, mouse and rotation upkeep
+-- go on (they check FDGScanOwnsMap); only snapping the map back waits.
+local function ScanOwnsMap()
+    if NS.probing then return true end
+    return FDGScanOwnsMap()
 end
 NS.ScanOwnsMap = ScanOwnsMap
 
@@ -828,7 +836,7 @@ local function SyncMapHolder()
         if mapHolder:IsShown() then mapHolder:Hide() end
         return
     end
-    if ScanOwnsMap() then return end -- keep the at-rest geometry while the map is away
+    if FDGScanOwnsMap() then return end -- keep the at-rest geometry while FDG resizes the map
     local mEff, uEff = NS.Num(Minimap:GetEffectiveScale()), NS.Num(UIParent:GetEffectiveScale())
     local w, h = NS.Num(Minimap:GetWidth()), NS.Num(Minimap:GetHeight())
     if not (mEff and uEff and w and h) or uEff <= 0 then return end
@@ -882,7 +890,7 @@ local function Read(method)
     if ok and not (issecretvalue and issecretvalue(v)) then return v end
 end
 local function ApplyHoldMouse()
-    if InCombatLockdown() or ScanOwnsMap() then return end
+    if InCombatLockdown() or FDGScanOwnsMap() then return end
     local hud = _G.ForeverFarmHUD_HUD
     local hdb = ForeverFarmHUDDB and ForeverFarmHUDDB.hud
     local open = hud and hud:IsShown() and hdb and hdb.enabled and db and not db.disabled
@@ -1576,8 +1584,7 @@ local HELP = {
     "/farm fog [yd]  - world map: whole route / only near you",
     "/farm track  - swap Find Herbs / Find Minerals while the HUD is open (on by default)",
     "/farm size <1-10>  - node dots and icons on the HUD, times normal size (3 by default)    /fdg  - gathering settings",
-    "/farm scan [on | off]  - FDG's farming map on the HUD; hides the game's own dots (off by default)",
-    "/farm check [log]  - dot test on/off (measure only; runs when the cursor rests on a HUD dot); log shows results (on by default)",
+    "/farm scan [on | off | log]  - node sweep: finds herbs and ore on the HUD and keeps both kinds drawn across swaps (on by default)",
     "/farm static  - HUD map keeps north up / turns with you (north up by default)",
     "/farm bindings  - wheel down = Interact, wheel up = Dire Wolf, middle click = auto run; off by default",
     "/farm fx  - effects on/off    /farm combo <sec>  - gathering combo window",
@@ -1681,18 +1688,14 @@ SlashCmdList.FOREVERFARMROUTE = function(msg)
         if n then db.nodeSize = math.max(1, math.min(10, n)) end
         Print("Node size on the HUD: " .. NS.NodeSize() .. "x normal  (/farm size <1-10>, 3 by default)")
     elseif cmd == "scan" then
-        if rest:lower() == "off" then db.nodeScan = false
-        elseif rest:lower() == "on" then db.nodeScan = true
-        else db.nodeScan = not db.nodeScan end
-        local gathering = NS.Gathering
-        if not db.nodeScan and gathering and gathering.QuickScanner then gathering.QuickScanner:StopFarmMinimap() end
-        Print("FDG quick scan and farming map: " .. (db.nodeScan and "on" or "off"))
-    elseif cmd == "check" then
         local G = NS.Gathering
-        if rest:lower() ~= "log" then db.dotTest = db.dotTest == false end
-        Print("Dot test (measure only): " .. (db.dotTest ~= false and "on" or "off")
-            .. "  (/farm check to toggle, /farm check log for results)")
-        if G and G.DotTestSummary then Print(G:DotTestSummary()) end
+        local word = rest:lower()
+        if word == "off" then db.sweep = false
+        elseif word == "on" then db.sweep = true
+        elseif word ~= "log" then db.sweep = db.sweep == false end
+        Print("Node sweep on the HUD: " .. (db.sweep ~= false and "on" or "off")
+            .. "  (/farm scan to toggle, /farm scan log for results)")
+        if word == "log" and G and G.SweepSummary then Print(G:SweepSummary()) end
     elseif cmd == "static" then
         db.staticMap = not db.staticMap
         Print("HUD map: " .. (db.staticMap and "north up" or "turns with you")
@@ -1774,13 +1777,9 @@ driver:SetScript("OnEvent", function(self, event, arg1)
         db.dir, db.target = nil, nil
         -- 2026-11-20: the trail now lasts about 10 s; move saved settings over once.
         if not db.trail10 then db.trailSeconds, db.trail10 = 10, true end
-        -- 2026-11-20: FDG's farming map hides the game's dots on /farm and holds
-        -- herb/ore swaps; the spawn-spot checks replace it. Switch it off once.
-        if not db.scanOff5 then db.nodeScan, db.scanOff5 = false, true end
-        -- 2026-11-20: /farm size replaces /farm dots and /farm icons.
-        db.dotScale = nil
-        -- 2026-11-20: the dot test replaces the spawn-spot checks.
-        db.swapCheck = nil
+        -- 2026-11-20: the node sweep (/farm scan) replaces FDG's farming map, the
+        -- spawn-spot checks and the dot test; /farm size replaces /farm dots and icons.
+        db.nodeScan, db.scanOff5, db.swapCheck, db.dotTest, db.dotScale = nil, nil, nil, nil, nil
         -- 2026-11-20: back to a north-up HUD map (a test left it rotating, and
         -- each scan turns it north-up, so it flipped every swap).
         if not db.static2 then db.staticMap, db.static2 = true, true end

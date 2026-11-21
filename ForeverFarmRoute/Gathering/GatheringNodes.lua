@@ -647,6 +647,9 @@ end
 
 local function drawLayer(ctx, now, layer, pool, mode)
     if not layer or not ctx then hideIcons(pool); return end
+    -- FarmRoute: while the node sweep owns the /farm HUD it draws the nodes
+    -- itself (Sweep.lua); these icons would be a second copy.
+    if mode == "minimap" and NS.SweepOwnsHUD and NS:SweepOwnsHUD() then hideIcons(pool); return end
     if mode == "minimap" then followMap(layer) end
     if mode=="hud" then
         local strata,level=NS.db.hud.overlayStrata or "HIGH",NS.db.hud.overlayLevel or 110
@@ -3247,8 +3250,8 @@ local function placementOnUpdate(_, dt)
     if now >= nextDraw then draw(ctx, now); nextDraw = now + 0.1 end
     if NS.ManualNodeHoverEnabled then
         scan, validation = nil, nil
-        -- FarmRoute: during a dot test the map is slid under the cursor on
-        -- purpose; those are the test's reads, not a hover (DotTest.lua).
+        -- FarmRoute: while the node sweep holds the map it slides it under the
+        -- cursor on purpose and records what it finds itself (Sweep.lua).
         if NS.probing then return end
         local ok, err = pcall(physicalUpdate, ctx, now)
         if ok and err then draw(ctx, now) end -- Show new physical observations in this frame.

@@ -65,4 +65,4 @@ Gathering\MinimapControls.lua
 Gathering\MinimapHover.lua
 Gathering\ExperimentalMinimap.lua
 Gathering\QuickScanner.lua
-Gathering\DotTest.lua
+Gathering\Sweep.lua
